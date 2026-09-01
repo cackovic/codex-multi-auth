@@ -162,8 +162,8 @@ Context budget guard fields (ships **disabled**; thresholds and overrides are se
 | `minRotationIntervalMs` | `60000` | Minimum bias window toward the last-served account before free hybrid switch (set `0` to disable) |
 | `tokenInvalidationCooldownMs` | `300000` | Cooldown after explicit OAuth token invalidation/revocation (5 minutes) |
 | `preemptiveQuotaEnabled` | `true` | Defer requests before remaining quota is critically low |
-| `preemptiveQuotaRemainingPercent5h` | `5` | 5-hour quota threshold |
-| `preemptiveQuotaRemainingPercent7d` | `5` | 7-day quota threshold |
+| `preemptiveQuotaRemainingPercent5h` | `5` | 5-hour quota threshold (overridable per account, see `account quota-limit` in [commands.md](./commands.md)) |
+| `preemptiveQuotaRemainingPercent7d` | `5` | 7-day quota threshold (overridable per account, see `account quota-limit` in [commands.md](./commands.md)) |
 | `preemptiveQuotaMaxDeferralMs` | `7200000` | Maximum quota-based deferral window |
 | `retryAllAccountsRateLimited` | `false` | When every account is rate-limited, wait for the soonest quota window and retry instead of failing immediately. Off by default; enable it (with a bounded `retryAllAccountsMaxRetries`/`retryAllAccountsMaxWaitMs`) for high-parallelism workloads — see [High parallelism / swarms of agents](../troubleshooting.md#high-parallelism--swarms-of-agents) |
 | `retryAllAccountsMaxWaitMs` | `0` | Maximum wait budget for all-accounts-rate-limited retries (`0` = no wait) |

@@ -25,6 +25,7 @@ function printAccountUsage(logInfo: (message: string) => void): void {
 			"  codex-multi-auth account tag <index> <tag>",
 			"  codex-multi-auth account untag <index> <tag>",
 			"  codex-multi-auth account weight <index> <0..10>",
+			"  codex-multi-auth account quota-limit <index> [--5h <0..100|clear>] [--7d <0..100|clear>]",
 			"  codex-multi-auth account pause|unpause|drain|undrain <index>",
 			"  codex-multi-auth account note <index> <text>",
 			"  codex-multi-auth account policy list [--json]",
@@ -62,6 +63,10 @@ function policySummary(store: AccountPolicyStore, storage: AccountStorageV3 | nu
 			paused: policy?.paused ?? false,
 			drained: policy?.drained ?? false,
 			note: policy?.note ?? null,
+			quota5hLimitPercent:
+				policy?.quotaRemainingPercentThreshold5h ?? null,
+			quota7dLimitPercent:
+				policy?.quotaRemainingPercentThreshold7d ?? null,
 		};
 	});
 }
@@ -110,6 +115,12 @@ export async function runAccountCommand(
 		for (const entry of payload.accounts) {
 			const markers = [
 				`weight=${entry.weight}`,
+				entry.quota5hLimitPercent === null
+					? null
+					: `quota5h=${entry.quota5hLimitPercent}%`,
+				entry.quota7dLimitPercent === null
+					? null
+					: `quota7d=${entry.quota7dLimitPercent}%`,
 				entry.paused ? "paused" : null,
 				entry.drained ? "drained" : null,
 				entry.tags.length > 0 ? `tags=${entry.tags.join(",")}` : null,
@@ -164,6 +175,59 @@ export async function runAccountCommand(
 		}, now);
 		await saveStore(store);
 		logInfo(`Set account ${resolved.index + 1} weight to ${weight}.`);
+		return 0;
+	}
+
+	if (command === "quota-limit") {
+		type QuotaLimitValue = number | null;
+		const parsed: {
+			quota5h?: QuotaLimitValue;
+			quota7d?: QuotaLimitValue;
+		} = {};
+		const quotaArgs = rest.slice(1);
+		for (let index = 0; index < quotaArgs.length; index += 2) {
+			const flag = quotaArgs[index];
+			const rawValue = quotaArgs[index + 1];
+			if ((flag !== "--5h" && flag !== "--7d") || rawValue === undefined) {
+				logError(
+					"quota-limit requires --5h and/or --7d with a value from 0 to 100 or clear.",
+				);
+				return 1;
+			}
+			const value =
+				rawValue === "clear"
+					? null
+					: /^(?:100|\d{1,2})(?:\.\d+)?$/.test(rawValue)
+						? Number(rawValue)
+						: Number.NaN;
+			if (
+				value !== null &&
+				(!Number.isFinite(value) || value < 0 || value > 100)
+			) {
+				logError(`${flag} requires a number from 0 to 100 or clear.`);
+				return 1;
+			}
+			if (flag === "--5h") parsed.quota5h = value;
+			if (flag === "--7d") parsed.quota7d = value;
+		}
+		if (parsed.quota5h === undefined && parsed.quota7d === undefined) {
+			logError("quota-limit requires at least one of --5h or --7d.");
+			return 1;
+		}
+		const policy = upsertAccountPolicy(store, accountKey, (next) => {
+			if (parsed.quota5h !== undefined) {
+				next.quotaRemainingPercentThreshold5h = parsed.quota5h;
+			}
+			if (parsed.quota7d !== undefined) {
+				next.quotaRemainingPercentThreshold7d = parsed.quota7d;
+			}
+		}, now);
+		await saveStore(store);
+		const quota5h = policy.quotaRemainingPercentThreshold5h;
+		const quota7d = policy.quotaRemainingPercentThreshold7d;
+		logInfo(
+			`Updated account ${resolved.index + 1} quota limits: 5h=${quota5h === null ? "global" : `${quota5h}%`}, 7d=${quota7d === null ? "global" : `${quota7d}%`}.`,
+		);
 		return 0;
 	}
 

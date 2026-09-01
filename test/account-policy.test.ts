@@ -70,6 +70,107 @@ describe("account policy store", () => {
 		});
 	});
 
+	it("normalizes per-window quota thresholds on load", async () => {
+		const { getAccountPolicyPath, loadAccountPolicyStore } = await import(
+			"../lib/account-policy.js"
+		);
+		const keys = Array.from(
+			{ length: 5 },
+			(_unused, index) => `sha256:${String(index).padStart(64, "0")}`,
+		);
+		await fs.writeFile(
+			getAccountPolicyPath(),
+			JSON.stringify({
+				version: 1,
+				accounts: {
+					[keys[0]!]: {
+						quotaRemainingPercentThreshold5h: 42.9,
+						quotaRemainingPercentThreshold7d: 17,
+					},
+					[keys[1]!]: {
+						quotaRemainingPercentThreshold5h: 150,
+						quotaRemainingPercentThreshold7d: -12,
+					},
+					[keys[2]!]: {
+						quotaRemainingPercentThreshold5h: "50",
+						quotaRemainingPercentThreshold7d: Number.NaN,
+					},
+					[keys[3]!]: {},
+					[keys[4]!]: null,
+				},
+			}),
+			"utf8",
+		);
+
+		const store = await loadAccountPolicyStore();
+		expect(store.accounts[keys[0]!]).toMatchObject({
+			quotaRemainingPercentThreshold5h: 42,
+			quotaRemainingPercentThreshold7d: 17,
+		});
+		expect(store.accounts[keys[1]!]).toMatchObject({
+			quotaRemainingPercentThreshold5h: 100,
+			quotaRemainingPercentThreshold7d: 0,
+		});
+		expect(store.accounts[keys[2]!]).toMatchObject({
+			quotaRemainingPercentThreshold5h: null,
+			quotaRemainingPercentThreshold7d: null,
+		});
+		expect(store.accounts[keys[3]!]).toMatchObject({
+			quotaRemainingPercentThreshold5h: null,
+			quotaRemainingPercentThreshold7d: null,
+		});
+		expect(store.accounts[keys[4]!]).toMatchObject({
+			quotaRemainingPercentThreshold5h: null,
+			quotaRemainingPercentThreshold7d: null,
+		});
+	});
+
+	it("returns undefined or a partial scheduler override as appropriate", async () => {
+		const { getAccountQuotaThresholdOverride, upsertAccountPolicy } = await import(
+			"../lib/account-policy.js"
+		);
+		const store = { version: 1 as const, accounts: {} };
+		const key = `sha256:${"a".repeat(64)}`;
+		const empty = upsertAccountPolicy(store, key, () => undefined, 1);
+		expect(getAccountQuotaThresholdOverride(undefined)).toBeUndefined();
+		expect(getAccountQuotaThresholdOverride(empty)).toBeUndefined();
+
+		const primaryOnly = upsertAccountPolicy(store, key, (policy) => {
+			policy.quotaRemainingPercentThreshold5h = 55;
+		}, 2);
+		expect(getAccountQuotaThresholdOverride(primaryOnly)).toEqual({
+			remainingPercentThresholdPrimary: 55,
+		});
+	});
+
+	it("round-trips a cleared threshold through upsert and storage", async () => {
+		const {
+			getAccountQuotaThresholdOverride,
+			loadAccountPolicyStore,
+			saveAccountPolicyStore,
+			upsertAccountPolicy,
+		} = await import("../lib/account-policy.js");
+		const store = await loadAccountPolicyStore();
+		const key = `sha256:${"b".repeat(64)}`;
+		upsertAccountPolicy(store, key, (policy) => {
+			policy.quotaRemainingPercentThreshold5h = 50;
+			policy.quotaRemainingPercentThreshold7d = 10;
+		}, 1);
+		upsertAccountPolicy(store, key, (policy) => {
+			policy.quotaRemainingPercentThreshold5h = null;
+		}, 2);
+		await saveAccountPolicyStore(store);
+
+		const loaded = await loadAccountPolicyStore();
+		expect(loaded.accounts[key]).toMatchObject({
+			quotaRemainingPercentThreshold5h: null,
+			quotaRemainingPercentThreshold7d: 10,
+		});
+		expect(getAccountQuotaThresholdOverride(loaded.accounts[key])).toEqual({
+			remainingPercentThresholdSecondary: 10,
+		});
+	});
+
 	it("does not use mutable account indexes as policy identity", async () => {
 		const { getAccountPolicyKey } = await import("../lib/account-policy.js");
 		const unidentified = {
@@ -124,4 +225,3 @@ describe("account policy store", () => {
 		);
 	});
 });
-

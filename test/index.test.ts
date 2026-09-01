@@ -1795,6 +1795,147 @@ describe("OpenAIOAuthPlugin fetch handler", () => {
 		expect(syncCodexCliSelectionMock).toHaveBeenCalledWith(0);
 	});
 
+	it("applies a per-account quota override above the global threshold", async () => {
+		const { AccountManager } = await import("../lib/accounts.js");
+		const { getAccountPolicyKey } = await import("../lib/account-policy.js");
+		const runtimePolicy = await import("../lib/policy/runtime-policy.js");
+		const account = {
+			index: 0,
+			accountId: "quota-override-account",
+			accountIdSource: "manual",
+			email: "quota-override@example.com",
+			refreshToken: "quota-override-refresh",
+		};
+		vi.spyOn(AccountManager, "loadFromDisk").mockResolvedValueOnce(
+			buildStableRoutingManager(account) as never,
+		);
+		const accountKey = getAccountPolicyKey(account, account.index);
+		const policyState: Awaited<
+			ReturnType<typeof runtimePolicy.loadRuntimePolicyState>
+		> = {
+			accountPolicies: {
+				version: 1,
+				accounts: {
+					[accountKey]: {
+						accountKey,
+						tags: [],
+						weight: 1,
+						paused: false,
+						drained: false,
+						note: null,
+						quotaRemainingPercentThreshold5h: 50,
+						quotaRemainingPercentThreshold7d: null,
+						updatedAt: Date.now(),
+					},
+				},
+			},
+			budgets: { version: 1, limits: {} },
+			project: {
+				startDir: "/repo",
+				projectRoot: "/repo",
+				identityRoot: "/repo",
+				projectKey: null,
+				profile: null,
+			},
+		};
+		vi.spyOn(runtimePolicy, "loadRuntimePolicyState").mockResolvedValue(
+			policyState,
+		);
+		globalThis.fetch = vi.fn(async () =>
+			new Response(JSON.stringify({ content: "test" }), {
+				status: 200,
+				headers: {
+					"x-codex-primary-used-percent": "60",
+					"x-codex-primary-reset-after-seconds": "60",
+				},
+			}),
+		);
+
+		const { sdk } = await setupPlugin();
+		const first = await sdk.fetch!("https://api.openai.com/v1/chat", {
+			method: "POST",
+			body: JSON.stringify({ model: "gpt-5.1" }),
+		});
+		const second = await sdk.fetch!("https://api.openai.com/v1/chat", {
+			method: "POST",
+			body: JSON.stringify({ model: "gpt-5.1" }),
+		});
+
+		expect(first.status).toBe(200);
+		expect(second.status).toBe(503);
+		expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+	});
+
+	it("leaves an account without a quota override on the global threshold", async () => {
+		const { AccountManager } = await import("../lib/accounts.js");
+		const runtimePolicy = await import("../lib/policy/runtime-policy.js");
+		const account = {
+			index: 0,
+			accountId: "quota-default-account",
+			accountIdSource: "manual",
+			email: "quota-default@example.com",
+			refreshToken: "quota-default-refresh",
+		};
+		vi.spyOn(AccountManager, "loadFromDisk").mockResolvedValueOnce(
+			buildStableRoutingManager(account) as never,
+		);
+		vi.spyOn(runtimePolicy, "loadRuntimePolicyState").mockResolvedValue({
+			accountPolicies: { version: 1, accounts: {} },
+			budgets: { version: 1, limits: {} },
+			project: {
+				startDir: "/repo",
+				projectRoot: "/repo",
+				identityRoot: "/repo",
+				projectKey: null,
+				profile: null,
+			},
+		});
+		globalThis.fetch = vi.fn(async () =>
+			new Response(JSON.stringify({ content: "test" }), {
+				status: 200,
+				headers: {
+					"x-codex-primary-used-percent": "60",
+					"x-codex-primary-reset-after-seconds": "60",
+				},
+			}),
+		);
+
+		const { sdk } = await setupPlugin();
+		const first = await sdk.fetch!("https://api.openai.com/v1/chat", {
+			method: "POST",
+			body: JSON.stringify({ model: "gpt-5.1" }),
+		});
+		const second = await sdk.fetch!("https://api.openai.com/v1/chat", {
+			method: "POST",
+			body: JSON.stringify({ model: "gpt-5.1" }),
+		});
+
+		expect(first.status).toBe(200);
+		expect(second.status).toBe(200);
+		expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+	});
+
+	it("fails open when runtime policy loading rejects", async () => {
+		const runtimePolicy = await import("../lib/policy/runtime-policy.js");
+		vi.spyOn(runtimePolicy, "loadRuntimePolicyState").mockRejectedValueOnce(
+			new Error("policy unavailable"),
+		);
+		globalThis.fetch = vi
+			.fn()
+			.mockResolvedValue(
+				new Response(JSON.stringify({ content: "test" }), { status: 200 }),
+			);
+
+		const { sdk } = await setupPlugin();
+		const response = await sdk.fetch!("https://api.openai.com/v1/chat", {
+			method: "POST",
+			body: JSON.stringify({ model: "gpt-5.1" }),
+		});
+
+		expect(response.status).toBe(200);
+		expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+	});
+
 	it("injects stored previous_response_id on follow-up requests when continuation is enabled", async () => {
 		const { AccountManager } = await import("../lib/accounts.js");
 		const configModule = await import("../lib/config.js");

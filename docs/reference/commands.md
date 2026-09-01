@@ -243,6 +243,7 @@ Usage:
 codex-multi-auth account tag <index> <tag>
 codex-multi-auth account untag <index> <tag>
 codex-multi-auth account weight <index> <0..10>
+codex-multi-auth account quota-limit <index> [--5h <0..100|clear>] [--7d <0..100|clear>]
 codex-multi-auth account pause <index>
 codex-multi-auth account unpause <index>
 codex-multi-auth account drain <index>
@@ -260,6 +261,11 @@ Notes:
   otherwise choose them.
 - `weight` accepts values from `0` to `10`; default is `1`. Higher weight adds a
   small score boost during hybrid selection.
+- `quota-limit` overrides the global `preemptiveQuotaRemainingPercent5h` /
+  `preemptiveQuotaRemainingPercent7d` config for one account only, enforced by
+  the preemptive quota scheduler on both runtime paths. Pass `clear` for a
+  window to revert that window to the global default. `account policy list`
+  shows the active override (`quota5h=N%` / `quota7d=N%`) when set.
 - `tag` values are normalized to lowercase filesystem-safe labels and can
   interact with routing-profile preferred/avoid tags.
 

@@ -143,10 +143,15 @@ import {
 	readQuotaSchedulerSnapshot,
 } from "./lib/preemptive-quota-scheduler.js";
 import {
+	getAccountPolicyKey,
+	getAccountQuotaThresholdOverride,
+} from "./lib/account-policy.js";
+import {
 	createRuntimeUsageRecorder,
 	evaluateRuntimePolicy,
 	loadRuntimePolicyState,
 	type RuntimePolicyDecision,
+	type RuntimePolicyState,
 	type RuntimeUsageRecorder,
 	type RuntimeUsageRecordInput,
 } from "./lib/policy/runtime-policy.js";
@@ -1110,8 +1115,9 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 								runtimeMetrics.lastRequestAt = Date.now();
 								syncRuntimeObservability(requestTraceId);
 								let runtimePolicyDecision: RuntimePolicyDecision | null = null;
+								let runtimePolicyState: RuntimePolicyState | null = null;
 								try {
-									const runtimePolicyState = await loadRuntimePolicyState();
+									runtimePolicyState = await loadRuntimePolicyState();
 									runtimePolicyDecision = await evaluateRuntimePolicy({
 										state: runtimePolicyState,
 										accounts: accountManager.getAccountsSnapshot(),
@@ -1611,8 +1617,15 @@ export const OpenAIOAuthPlugin: Plugin = async ({ client }: PluginInput) => {
 										}
 										const quotaScheduleKey = `${entitlementAccountKey}:${model ?? modelFamily}`;
 										const capabilityModelKey = model ?? modelFamily;
-										const quotaDeferral =
-											preemptiveQuotaScheduler.getDeferral(quotaScheduleKey);
+										const quotaDeferral = preemptiveQuotaScheduler.getDeferral(
+											quotaScheduleKey,
+											Date.now(),
+											getAccountQuotaThresholdOverride(
+												runtimePolicyState?.accountPolicies.accounts[
+													getAccountPolicyKey(account, account.index)
+												],
+											),
+										);
 										if (quotaDeferral.defer && quotaDeferral.waitMs > 0) {
 											accountManager.markRateLimitedWithReason(
 												account,

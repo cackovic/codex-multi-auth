@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	getAccountPolicyKey,
+	type AccountPolicyStore,
+} from "../lib/account-policy.js";
+import {
 	DEFAULT_DASHBOARD_DISPLAY_SETTINGS,
 	type DashboardDisplaySettings,
 } from "../lib/dashboard-settings.js";
@@ -115,6 +119,10 @@ function emptyCache(): QuotaCacheData {
 	return { byAccountId: {}, byEmail: {} };
 }
 
+function emptyPolicies(): AccountPolicyStore {
+	return { version: 1, accounts: {} };
+}
+
 // The menu row is painted with ANSI in either UI mode; only the text is contract.
 function stripAnsi(value: string): string {
 	return value.replace(/\x1b\[[0-9;]*m/g, "");
@@ -210,6 +218,7 @@ describe("toExistingAccountInfo", () => {
 			storage,
 			cache,
 			settings({ menuSortEnabled: false }),
+			emptyPolicies(),
 		);
 
 		expect(rows.map((row) => row.status)).toEqual([
@@ -224,6 +233,55 @@ describe("toExistingAccountInfo", () => {
 		expect(rows[4].quotaRateLimited).toBe(true);
 		expect(rows[0].isCurrentAccount).toBe(true);
 		expect(rows[0].isDefaultAccount).toBe(true);
+		expect(rows[0].quota5hLimitPercent).toBeNull();
+		expect(rows[0].quota7dLimitPercent).toBeNull();
+	});
+
+	it("adds per-account quota limits to the row and quota summary", () => {
+		const now = Date.now();
+		const storage = storageWith([account("protected")]);
+		const cache: QuotaCacheData = {
+			byAccountId: {
+				acc_protected: cacheEntry(
+					{
+						primary: {
+							usedPercent: 58,
+							windowMinutes: 300,
+							resetAtMs: now + 3_600_000,
+						},
+					},
+					now,
+				),
+			},
+			byEmail: {},
+		};
+		const accountKey = getAccountPolicyKey(storage.accounts[0]!, 0);
+		const policies = emptyPolicies();
+		policies.accounts[accountKey] = {
+			accountKey,
+			tags: [],
+			weight: 1,
+			paused: false,
+			drained: false,
+			note: null,
+			quotaRemainingPercentThreshold5h: 50,
+			quotaRemainingPercentThreshold7d: null,
+			updatedAt: now,
+		};
+
+		const rows = toExistingAccountInfo(
+			storage,
+			cache,
+			settings({ menuSortEnabled: false }),
+			policies,
+		);
+
+		expect(rows[0]).toMatchObject({
+			quota5hLimitPercent: 50,
+			quota7dLimitPercent: null,
+		});
+		expect(rows[0].quotaSummary).toContain("5h 42% (limit 50%)");
+		expect(rows[0].quotaSummary).not.toContain("7d 90% (limit");
 	});
 
 	it("orders rows ready-first and renumbers display indexes", () => {
@@ -259,6 +317,7 @@ describe("toExistingAccountInfo", () => {
 				menuSortMode: "ready-first",
 				menuSortPinCurrent: false,
 			}),
+			emptyPolicies(),
 		);
 
 		// Most quota headroom first, exhausted account last.
@@ -303,6 +362,7 @@ describe("toExistingAccountInfo", () => {
 				menuSortMode: "ready-first",
 				menuSortQuickSwitchVisibleRow: false,
 			}),
+			emptyPolicies(),
 		);
 
 		expect(rows.map((row) => row.accountId)).toEqual(["acc_high", "acc_low"]);
@@ -336,6 +396,7 @@ describe("toExistingAccountInfo", () => {
 			storage,
 			cache,
 			settings({ menuSortEnabled: false }),
+			emptyPolicies(),
 		);
 
 		expect(rows[0].quotaPrimaryWindowMinutes).toBe(43_200);
@@ -382,6 +443,7 @@ describe("toExistingAccountInfo", () => {
 				menuSortMode: "ready-first",
 				menuSortPinCurrent: false,
 			}),
+			emptyPolicies(),
 		);
 
 		// The monthly account has far more headroom, so it sorts first.
@@ -398,6 +460,7 @@ describe("toExistingAccountInfo", () => {
 			storage,
 			null,
 			settings({ menuSortEnabled: false }),
+			emptyPolicies(),
 		);
 
 		expect(rows.map((row) => row.accountId)).toEqual(["acc_b", "acc_a"]);

@@ -65,8 +65,10 @@ export interface ExistingAccountInfo {
 	status?: AccountStatus;
 	quotaSummary?: string;
 	quota5hLeftPercent?: number;
+	quota5hLimitPercent?: number | null;
 	quota5hResetAtMs?: number;
 	quota7dLeftPercent?: number;
+	quota7dLimitPercent?: number | null;
 	quota7dResetAtMs?: number;
 	quotaPrimaryWindowMinutes?: number;
 	quotaSecondaryWindowMinutes?: number;

@@ -76,6 +76,7 @@ All governance data stays under `~/.codex/multi-auth`. Nothing here is a hosted 
 | Usage ledger | Redacted request/usage rows (no prompts or tokens) with summaries and rotation | `codex-multi-auth usage` |
 | Budget guards | Local limits by window (hour/day/week/month) for requests, tokens, or cost | `codex-multi-auth budget` |
 | Account policies | Tags, weights, notes, **pause**, and **drain** — pause/drain are **enforced at runtime** on the rotation path | `codex-multi-auth account …` |
+| Per-account quota limit | Overrides the global preemptive-quota remaining-percent thresholds for one account — **enforced at runtime** on both rotation paths | `codex-multi-auth account quota-limit` |
 | Routing profiles | Project-aware model allow/deny and account preference signals | profile store + runtime evaluation |
 | Model capability matrix | Local view of model/account availability from profiles, quota cache, and capability policy | `codex-multi-auth models` |
 | Operator monitor | One aggregate view of runtime, usage, policy, profile, model, quota, and project context | `codex-multi-auth monitor` |

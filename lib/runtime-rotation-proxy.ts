@@ -48,10 +48,15 @@ import {
 	recordRuntimePoolExhaustion,
 } from "./runtime/runtime-observability.js";
 import {
+	getAccountPolicyKey,
+	getAccountQuotaThresholdOverride,
+} from "./account-policy.js";
+import {
 	createRuntimeUsageRecorder,
 	evaluateRuntimePolicy,
 	loadRuntimePolicyState,
 	type RuntimePolicyDecision,
+	type RuntimePolicyState,
 } from "./policy/runtime-policy.js";
 import { createUsageStreamScanner } from "./usage/usage-extraction.js";
 import { isWorkspaceDisabledError } from "./request/fetch-helpers.js";
@@ -1009,10 +1014,11 @@ async function handleRequestInner(
 				: buildResponsesRequestContext(req, requestBody);
 		const requestStartedAt = state.now();
 		let policyDecision: RuntimePolicyDecision | null = null;
+		let policyState: RuntimePolicyState | null = null;
 		let projectKey: string | null = null;
 		let policyError: string | null = null;
 		try {
-			const policyState = await loadRuntimePolicyState();
+			policyState = await loadRuntimePolicyState();
 			projectKey = policyState.project.projectKey;
 			policyDecision = await evaluateRuntimePolicy({
 				state: policyState,
@@ -1317,6 +1323,11 @@ async function handleRequestInner(
 			const preemptiveDeferral = state.preemptiveQuotaScheduler.getDeferral(
 				quotaScheduleKey,
 				state.now(),
+				getAccountQuotaThresholdOverride(
+					policyState?.accountPolicies.accounts[
+						getAccountPolicyKey(selected, selected.index)
+					],
+				),
 			);
 			if (preemptiveDeferral.defer && preemptiveDeferral.waitMs > 0) {
 				accountSkipReasons.set(
@@ -1740,6 +1751,11 @@ async function handleRequestInner(
 			const quotaDeferral = state.preemptiveQuotaScheduler.getDeferral(
 				quotaScheduleKey,
 				state.now(),
+				getAccountQuotaThresholdOverride(
+					policyState?.accountPolicies.accounts[
+						getAccountPolicyKey(refreshed.account, refreshed.account.index)
+					],
+				),
 			);
 			const nearExhaustionWaitMs = quotaDeferral.defer
 				? quotaDeferral.waitMs

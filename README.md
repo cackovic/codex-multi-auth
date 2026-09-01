@@ -198,6 +198,7 @@ which would rebind the row to a different workspace.
 | `codex-multi-auth best --live` | How do I switch to the forecast-best account (clears any pin)? |
 | `codex-multi-auth-codex --account <index\|email\|id>` | How do I force one account for a single wrapper session without changing my default? |
 | `codex-multi-auth forecast --live` | Which account looks best for the next session? |
+| `codex-multi-auth account quota-limit 1 --5h 50 --7d 10` | How do I override the global preemptive quota floors for one account? Use `clear` to restore either global default. |
 
 ### Repair
 
@@ -228,6 +229,7 @@ which would rebind the row to a different workspace.
 - active requests use a bounded outbound request budget so one prompt cannot walk the full pool indefinitely
 - repeated cross-account 5xx bursts trigger a short cooldown instead of continuing aggressive rotation
 - proactive refresh is staggered to reduce background refresh bursts
+- global `preemptiveQuotaRemainingPercent5h` / `preemptiveQuotaRemainingPercent7d` floors apply unless an account has a `codex-multi-auth account quota-limit` override
 - `codex-multi-auth status` surfaces recent runtime request metrics in text output, and `codex-multi-auth report --json` exposes the machine-readable cooldown/runtime snapshot
 
 ---

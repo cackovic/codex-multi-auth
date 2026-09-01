@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { request } from "node:http";
 import { AccountManager, getRuntimeTrackerKey } from "../lib/accounts.js";
+import { getAccountPolicyKey } from "../lib/account-policy.js";
 import { CodexValidationError } from "../lib/errors.js";
 import { HTTP_STATUS, OPENAI_HEADERS } from "../lib/constants.js";
 import {
@@ -20,6 +21,7 @@ import {
 	withRoutingMutex,
 } from "../lib/routing-mutex.js";
 import * as runtimePolicy from "../lib/policy/runtime-policy.js";
+import type { RuntimePolicyState } from "../lib/policy/runtime-policy.js";
 import { resetRefreshQueue } from "../lib/refresh-queue.js";
 import {
 	DEFAULT_TOKEN_BUCKET_CONFIG,
@@ -82,6 +84,20 @@ function createStorage(now: number, count = 2): AccountStorageV3 {
 			lastUsed: now - (count - index) * 60_000,
 			enabled: true,
 		})),
+	};
+}
+
+function createRuntimePolicyState(): RuntimePolicyState {
+	return {
+		accountPolicies: { version: 1, accounts: {} },
+		budgets: { version: 1, limits: {} },
+		project: {
+			startDir: "/repo",
+			projectRoot: "/repo",
+			identityRoot: "/repo",
+			projectKey: null,
+			profile: null,
+		},
 	};
 }
 
@@ -2263,6 +2279,64 @@ describe("runtime rotation proxy", () => {
 		expect(
 			accountManager.getAccountByIndex(0)?.rateLimitResetTimes["gpt-5-codex"],
 		).toBeTypeOf("number");
+	});
+
+	it("applies a per-account quota override above the global threshold", async () => {
+		const now = Date.now();
+		const accountManager = new AccountManager(undefined, createStorage(now));
+		const account = accountManager.getAccountByIndex(0)!;
+		const policyState = createRuntimePolicyState();
+		const accountKey = getAccountPolicyKey(account, account.index);
+		policyState.accountPolicies.accounts[accountKey] = {
+			accountKey,
+			tags: [],
+			weight: 1,
+			paused: false,
+			drained: false,
+			note: null,
+			quotaRemainingPercentThreshold5h: 50,
+			quotaRemainingPercentThreshold7d: null,
+			updatedAt: now,
+		};
+		const policySpy = vi
+			.spyOn(runtimePolicy, "loadRuntimePolicyState")
+			.mockResolvedValueOnce(policyState);
+		const { fetchImpl } = createRecordingFetch(() =>
+			textEventStream("data: override\n\n", {
+				"x-codex-primary-used-percent": "60",
+				"x-codex-primary-reset-after-seconds": "60",
+			}),
+		);
+		const proxy = await startProxy({ accountManager, fetchImpl });
+
+		await (await postResponses(proxy, { model: "gpt-5-codex", stream: true })).text();
+
+		expect(policySpy).toHaveBeenCalledTimes(1);
+		expect(
+			accountManager.getAccountByIndex(0)?.rateLimitResetTimes["gpt-5-codex"],
+		).toBeTypeOf("number");
+	});
+
+	it("leaves an account without a quota override on the global threshold", async () => {
+		const now = Date.now();
+		const accountManager = new AccountManager(undefined, createStorage(now));
+		const policySpy = vi
+			.spyOn(runtimePolicy, "loadRuntimePolicyState")
+			.mockResolvedValueOnce(createRuntimePolicyState());
+		const { fetchImpl } = createRecordingFetch(() =>
+			textEventStream("data: default\n\n", {
+				"x-codex-primary-used-percent": "60",
+				"x-codex-primary-reset-after-seconds": "60",
+			}),
+		);
+		const proxy = await startProxy({ accountManager, fetchImpl });
+
+		await (await postResponses(proxy, { model: "gpt-5-codex", stream: true })).text();
+
+		expect(policySpy).toHaveBeenCalledTimes(1);
+		expect(
+			accountManager.getAccountByIndex(0)?.rateLimitResetTimes["gpt-5-codex"],
+		).toBeUndefined();
 	});
 
 	it("uses the preemptive scheduler fallback when exhaustion has no reset header", async () => {

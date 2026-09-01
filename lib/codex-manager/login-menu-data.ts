@@ -1,4 +1,8 @@
 import { extractAccountId, sanitizeEmail } from "../accounts.js";
+import {
+	getAccountPolicyKey,
+	type AccountPolicyStore,
+} from "../account-policy.js";
 import type { ExistingAccountInfo } from "../cli.js";
 import { loadCodexCliState } from "../codex-cli/state.js";
 import { setCodexCliActiveSelection } from "../codex-cli/writer.js";
@@ -432,6 +436,7 @@ export function toExistingAccountInfo(
 	storage: AccountStorageV3,
 	quotaCache: QuotaCacheData | null,
 	displaySettings: DashboardDisplaySettings,
+	accountPolicies: AccountPolicyStore,
 	runtimeCurrent: RuntimeCurrentAccountSelection | null = null,
 ): ExistingAccountInfo[] {
 	const now = Date.now();
@@ -439,6 +444,12 @@ export function toExistingAccountInfo(
 	const layoutMode = resolveMenuLayoutMode(displaySettings);
 	const emailFallbackState = buildQuotaEmailFallbackState(storage.accounts);
 	const baseAccounts = storage.accounts.map((account, index) => {
+		const accountPolicy =
+			accountPolicies.accounts[getAccountPolicyKey(account, index)];
+		const quota5hLimitPercent =
+			accountPolicy?.quotaRemainingPercentThreshold5h ?? null;
+		const quota7dLimitPercent =
+			accountPolicy?.quotaRemainingPercentThreshold7d ?? null;
 		const entry = getPersistedQuotaViewForAccount(
 			quotaCache,
 			account,
@@ -468,13 +479,18 @@ export function toExistingAccountInfo(
 			status: mapAccountStatus(account, isCurrentAccount, now, entry),
 			quotaSummary:
 				(displaySettings.menuShowQuotaSummary ?? true) && entry
-					? formatAccountQuotaSummary(entry, now)
+					? formatAccountQuotaSummary(entry, now, {
+							limitPercent5h: quota5hLimitPercent,
+							limitPercent7d: quota7dLimitPercent,
+						})
 					: undefined,
 			quota5hLeftPercent: quotaLeftPercentFromUsed(entry?.primary.usedPercent),
+			quota5hLimitPercent,
 			quota5hResetAtMs: entry?.primary.resetAtMs,
 			quota7dLeftPercent: quotaLeftPercentFromUsed(
 				entry?.secondary.usedPercent,
 			),
+			quota7dLimitPercent,
 			quota7dResetAtMs: entry?.secondary.resetAtMs,
 			quotaPrimaryWindowMinutes: entry?.primary.windowMinutes,
 			quotaSecondaryWindowMinutes: entry?.secondary.windowMinutes,

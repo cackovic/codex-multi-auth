@@ -27,6 +27,11 @@ export interface QuotaSchedulerOptions {
 	maxDeferralMs?: number;
 }
 
+export interface QuotaDeferralOverrides {
+	remainingPercentThresholdPrimary?: number;
+	remainingPercentThresholdSecondary?: number;
+}
+
 const DEFAULT_REMAINING_PERCENT_THRESHOLD = 5;
 const DEFAULT_MAX_DEFERRAL_MS = 2 * 60 * 60_000;
 const MAX_TRUSTED_RESET_AGE_MS = MAX_RATE_LIMIT_DELAY_MS;
@@ -272,7 +277,11 @@ export class PreemptiveQuotaScheduler {
 		});
 	}
 
-	getDeferral(key: string, now = Date.now()): QuotaDeferralDecision {
+	getDeferral(
+		key: string,
+		now = Date.now(),
+		overrides?: QuotaDeferralOverrides,
+	): QuotaDeferralDecision {
 		this.maybePrune(now);
 		if (!this.enabled) {
 			return { defer: false, waitMs: 0 };
@@ -311,14 +320,26 @@ export class PreemptiveQuotaScheduler {
 			}
 		}
 
+		const primaryRemainingPercentThreshold = clampInt(
+			overrides?.remainingPercentThresholdPrimary ??
+				this.primaryRemainingPercentThreshold,
+			0,
+			100,
+		);
+		const secondaryRemainingPercentThreshold = clampInt(
+			overrides?.remainingPercentThresholdSecondary ??
+				this.secondaryRemainingPercentThreshold,
+			0,
+			100,
+		);
 		const primaryNearExhausted =
 			typeof snapshot.primary.usedPercent === "number" &&
 			Number.isFinite(snapshot.primary.usedPercent) &&
-			snapshot.primary.usedPercent >= 100 - this.primaryRemainingPercentThreshold;
+			snapshot.primary.usedPercent >= 100 - primaryRemainingPercentThreshold;
 		const secondaryNearExhausted =
 			typeof snapshot.secondary.usedPercent === "number" &&
 			Number.isFinite(snapshot.secondary.usedPercent) &&
-			snapshot.secondary.usedPercent >= 100 - this.secondaryRemainingPercentThreshold;
+			snapshot.secondary.usedPercent >= 100 - secondaryRemainingPercentThreshold;
 		const getNearExhaustedWait = (window: QuotaSchedulerWindow): number => {
 			const trustedWait = trustedResetWaitMs(window, snapshot, now);
 			return trustedWait === null ? this.maxDeferralMs : trustedWait;

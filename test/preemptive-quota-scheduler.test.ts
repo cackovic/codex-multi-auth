@@ -329,6 +329,132 @@ describe("preemptive quota scheduler", () => {
 		expect(decision.reason).toBe("quota-near-exhaustion");
 	});
 
+	it.each(["primary", "secondary"] as const)(
+		"a %s override can defer where the global threshold would not",
+		(window) => {
+			const scheduler = new PreemptiveQuotaScheduler({
+				remainingPercentThresholdPrimary: 5,
+				remainingPercentThresholdSecondary: 5,
+			});
+			scheduler.update("acc:model", {
+				status: 200,
+				primary: window === "primary" ? { usedPercent: 60, resetAtMs: 61_000 } : {},
+				secondary: window === "secondary" ? { usedPercent: 60, resetAtMs: 61_000 } : {},
+				updatedAt: 1_000,
+			});
+
+			expect(scheduler.getDeferral("acc:model", 2_000).defer).toBe(false);
+			expect(
+				scheduler.getDeferral("acc:model", 2_000, {
+					[window === "primary"
+						? "remainingPercentThresholdPrimary"
+						: "remainingPercentThresholdSecondary"]: 50,
+				}).reason,
+			).toBe("quota-near-exhaustion");
+		},
+	);
+
+	it.each(["primary", "secondary"] as const)(
+		"a %s override can avoid deferral from the global threshold",
+		(window) => {
+			const scheduler = new PreemptiveQuotaScheduler({
+				remainingPercentThresholdPrimary: 50,
+				remainingPercentThresholdSecondary: 50,
+			});
+			scheduler.update("acc:model", {
+				status: 200,
+				primary: window === "primary" ? { usedPercent: 60, resetAtMs: 61_000 } : {},
+				secondary: window === "secondary" ? { usedPercent: 60, resetAtMs: 61_000 } : {},
+				updatedAt: 1_000,
+			});
+
+			expect(scheduler.getDeferral("acc:model", 2_000).defer).toBe(true);
+			expect(
+				scheduler.getDeferral("acc:model", 2_000, {
+					[window === "primary"
+						? "remainingPercentThresholdPrimary"
+						: "remainingPercentThresholdSecondary"]: 5,
+				}),
+			).toEqual({ defer: false, waitMs: 0 });
+		},
+	);
+
+	it("leaves the other window on its instance threshold for a partial override", () => {
+		const scheduler = new PreemptiveQuotaScheduler({
+			remainingPercentThresholdPrimary: 5,
+			remainingPercentThresholdSecondary: 20,
+		});
+		scheduler.update("acc:model", {
+			status: 200,
+			primary: { usedPercent: 96, resetAtMs: 31_000 },
+			secondary: { usedPercent: 85, resetAtMs: 61_000 },
+			updatedAt: 1_000,
+		});
+
+		expect(
+			scheduler.getDeferral("acc:model", 2_000, {
+				remainingPercentThresholdPrimary: 0,
+			}),
+		).toEqual({
+			defer: true,
+			waitMs: 59_000,
+			reason: "quota-near-exhaustion",
+		});
+	});
+
+	it("clamps per-call overrides to the same range as configure", () => {
+		const scheduler = new PreemptiveQuotaScheduler({
+			remainingPercentThresholdPrimary: 5,
+		});
+		scheduler.update("acc:model", {
+			status: 200,
+			primary: { usedPercent: 1, resetAtMs: 61_000 },
+			secondary: {},
+			updatedAt: 1_000,
+		});
+
+		expect(
+			scheduler.getDeferral("acc:model", 2_000, {
+				remainingPercentThresholdPrimary: 200,
+			}).defer,
+		).toBe(true);
+		expect(
+			scheduler.getDeferral("acc:model", 2_000, {
+				remainingPercentThresholdPrimary: -20,
+			}),
+		).toEqual({ defer: false, waitMs: 0 });
+	});
+
+	it("does not let threshold overrides change a 429 deferral", () => {
+		const scheduler = new PreemptiveQuotaScheduler();
+		scheduler.markRateLimited("acc:model", 30_000, 1_000);
+		const baseline = scheduler.getDeferral("acc:model", 2_000);
+
+		expect(
+			scheduler.getDeferral("acc:model", 2_000, {
+				remainingPercentThresholdPrimary: 0,
+				remainingPercentThresholdSecondary: 100,
+			}),
+		).toEqual(baseline);
+		expect(baseline.reason).toBe("rate-limit");
+	});
+
+	it("keeps omitted and explicit undefined overrides backward-compatible", () => {
+		const scheduler = new PreemptiveQuotaScheduler({
+			remainingPercentThresholdPrimary: 10,
+		});
+		scheduler.update("acc:model", {
+			status: 200,
+			primary: { usedPercent: 91, resetAtMs: 61_000 },
+			secondary: {},
+			updatedAt: 1_000,
+		});
+
+		expect(scheduler.getDeferral("acc:model", 2_000, undefined)).toEqual(
+			scheduler.getDeferral("acc:model", 2_000),
+		);
+	});
+
 	it("can disable preemptive deferral without clearing snapshots", () => {
 		const scheduler = new PreemptiveQuotaScheduler();
 		scheduler.markRateLimited("acc:model", 30_000, 1_000);
