@@ -54,6 +54,8 @@ describe("runtime policy", () => {
 			paused: true,
 			drained: false,
 			note: null,
+			quotaRemainingPercentThreshold5h: null,
+			quotaRemainingPercentThreshold7d: null,
 			updatedAt: 1,
 		};
 		policyState.project.profile = {

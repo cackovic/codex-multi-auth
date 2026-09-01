@@ -128,12 +128,15 @@ function isUninformativeFullQuotaWindow(
  */
 export interface CompactQuotaFormatOptions {
 	showReset?: boolean;
+	limitPercent5h?: number | null;
+	limitPercent7d?: number | null;
 }
 
 function formatCompactQuotaPart(
 	windowMinutes: number | undefined,
 	usedPercent: number | undefined,
 	resetAtMs: number | undefined,
+	limitPercent: number | null | undefined,
 	options: CompactQuotaFormatOptions,
 	now: number,
 ): string | null {
@@ -154,7 +157,11 @@ function formatCompactQuotaPart(
 	if (!reset && label === "quota" && (left === undefined || left >= 100)) {
 		return null;
 	}
-	const part = `${label} ${left}%`;
+	const limit =
+		typeof limitPercent === "number" && Number.isFinite(limitPercent)
+			? Math.max(0, Math.min(100, Math.floor(limitPercent)))
+			: null;
+	const part = `${label} ${left}%${limit === null ? "" : ` (limit ${limit}%)`}`;
 	if (!options.showReset) return part;
 	// A missing or malformed reset timestamp must never drop the percentage.
 	return reset ? `${part}, resets ${reset}` : part;
@@ -170,6 +177,7 @@ export function formatCompactQuotaSnapshot(
 			snapshot.primary.windowMinutes,
 			snapshot.primary.usedPercent,
 			snapshot.primary.resetAtMs,
+			options.limitPercent5h,
 			options,
 			now,
 		),
@@ -177,6 +185,7 @@ export function formatCompactQuotaSnapshot(
 			snapshot.secondary.windowMinutes,
 			snapshot.secondary.usedPercent,
 			snapshot.secondary.resetAtMs,
+			options.limitPercent7d,
 			options,
 			now,
 		),
@@ -221,6 +230,7 @@ export function formatAccountQuotaSummary(
 			entry.primary.windowMinutes,
 			entry.primary.usedPercent,
 			entry.primary.resetAtMs,
+			options.limitPercent5h,
 			options,
 			now,
 		),
@@ -228,6 +238,7 @@ export function formatAccountQuotaSummary(
 			entry.secondary.windowMinutes,
 			entry.secondary.usedPercent,
 			entry.secondary.resetAtMs,
+			options.limitPercent7d,
 			options,
 			now,
 		),

@@ -1,5 +1,6 @@
 ﻿import { sanitizeEmail } from "../accounts.js";
 import { isBrowserLaunchSuppressed } from "../auth/browser.js";
+import { loadAccountPolicyStore } from "../account-policy.js";
 import { promptAddAnotherAccount, promptLoginMode } from "../cli.js";
 import { ACCOUNT_LIMITS } from "../constants.js";
 import { loadDashboardDisplaySettings } from "../dashboard-settings.js";
@@ -228,12 +229,14 @@ async function runLoginDashboardLoop(
 		const runtimeCurrent = await loadRuntimeCurrentSelectionForStorage(
 			currentStorage,
 		);
+		const accountPolicies = await loadAccountPolicyStore();
 
 		const menuResult = await promptLoginMode(
 			toExistingAccountInfo(
 				currentStorage,
 				quotaCache,
 				displaySettings,
+				accountPolicies,
 				runtimeCurrent,
 			),
 			{

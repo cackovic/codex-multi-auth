@@ -250,6 +250,30 @@ describe("compact quota reset timestamps", () => {
 		);
 	});
 
+	it("appends only the configured per-window quota limits", () => {
+		const entry = {
+			status: "ok",
+			planType: "plus",
+			model: "gpt-5.3-codex",
+			fetchedAt: NOW,
+			primary: { usedPercent: 58, windowMinutes: 300, resetAtMs: SAME_DAY },
+			secondary: { usedPercent: 7, windowMinutes: 10080, resetAtMs: NEXT_WEEK },
+		} as unknown as QuotaCacheEntry;
+
+		expect(
+			formatAccountQuotaSummary(entry, NOW, { limitPercent5h: 50 }),
+		).toBe("5h 42% (limit 50%) | 7d 93%");
+		expect(
+			formatAccountQuotaSummary(entry, NOW, {
+				showReset: true,
+				limitPercent5h: 50,
+				limitPercent7d: 10,
+			}),
+		).toBe(
+			`5h 42% (limit 50%), resets ${formatQuotaResetAt(SAME_DAY, NOW)} | 7d 93% (limit 10%), resets ${formatQuotaResetAt(NEXT_WEEK, NOW)}`,
+		);
+	});
+
 	it("hides an unlabeled full quota window with no reset data", () => {
 		const unlabeledFull = {
 			status: 200,

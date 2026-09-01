@@ -65,6 +65,89 @@ describe("account command", () => {
 		});
 	});
 
+	it.each([
+		["5h only", ["--5h", "50"], 50, null],
+		["7d only", ["--7d", "10"], null, 10],
+		["both windows", ["--5h", "50", "--7d", "10"], 50, 10],
+	] as const)(
+		"sets quota limits for %s",
+		async (_label, flags, expected5h, expected7d) => {
+			const store: AccountPolicyStore = { version: 1, accounts: {} };
+			const deps = makeDeps(store);
+
+			expect(
+				await runAccountCommand(["quota-limit", "1", ...flags], deps),
+			).toBe(0);
+
+			const key = getAccountPolicyKey(makeStorage().accounts[0]!, 0);
+			expect(store.accounts[key]).toMatchObject({
+				quotaRemainingPercentThreshold5h: expected5h,
+				quotaRemainingPercentThreshold7d: expected7d,
+				updatedAt: 123,
+			});
+			expect(deps.savePolicyStore).toHaveBeenCalledTimes(1);
+		},
+	);
+
+	it("clears a previously set quota limit", async () => {
+		const store: AccountPolicyStore = { version: 1, accounts: {} };
+		const deps = makeDeps(store);
+
+		expect(
+			await runAccountCommand(
+				["quota-limit", "1", "--5h", "50", "--7d", "10"],
+				deps,
+			),
+		).toBe(0);
+		expect(
+			await runAccountCommand(["quota-limit", "1", "--5h", "clear"], deps),
+		).toBe(0);
+
+		const key = getAccountPolicyKey(makeStorage().accounts[0]!, 0);
+		expect(store.accounts[key]).toMatchObject({
+			quotaRemainingPercentThreshold5h: null,
+			quotaRemainingPercentThreshold7d: 10,
+		});
+		expect(deps.savePolicyStore).toHaveBeenCalledTimes(2);
+	});
+
+	it("rejects quota-limit without a window flag and does not save", async () => {
+		const deps = makeDeps({ version: 1, accounts: {} });
+
+		expect(await runAccountCommand(["quota-limit", "1"], deps)).toBe(1);
+		expect(deps.logError).toHaveBeenCalledWith(
+			"quota-limit requires at least one of --5h or --7d.",
+		);
+		expect(deps.savePolicyStore).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		["--5h", "101"],
+		["--7d", "not-a-percent"],
+	] as const)(
+		"rejects invalid quota limit %s %s and does not save",
+		async (flag, value) => {
+			const deps = makeDeps({ version: 1, accounts: {} });
+
+			expect(
+				await runAccountCommand(["quota-limit", "1", flag, value], deps),
+			).toBe(1);
+			expect(deps.savePolicyStore).not.toHaveBeenCalled();
+		},
+	);
+
+	it("uses the existing invalid-index failure for quota-limit", async () => {
+		const deps = makeDeps({ version: 1, accounts: {} });
+
+		expect(
+			await runAccountCommand(["quota-limit", "2", "--5h", "50"], deps),
+		).toBe(1);
+		expect(String(deps.logError.mock.calls[0]?.[0])).toContain(
+			"Account index is required",
+		);
+		expect(deps.savePolicyStore).not.toHaveBeenCalled();
+	});
+
 	it("lists policy state as json", async () => {
 		const storage = makeStorage();
 		const key = getAccountPolicyKey(storage.accounts[0]!, 0);
@@ -78,6 +161,8 @@ describe("account command", () => {
 					paused: true,
 					drained: false,
 					note: null,
+					quotaRemainingPercentThreshold5h: 50,
+					quotaRemainingPercentThreshold7d: null,
 					updatedAt: 123,
 				},
 			},
@@ -86,15 +171,40 @@ describe("account command", () => {
 
 		expect(await runAccountCommand(["policy", "list", "--json"], deps)).toBe(0);
 		const payload = JSON.parse(String(deps.logInfo.mock.calls[0]?.[0])) as {
-			accounts: Array<{ accountKey: string; tags: string[]; paused: boolean }>;
+			accounts: Array<{
+				accountKey: string;
+				tags: string[];
+				paused: boolean;
+				quota5hLimitPercent: number | null;
+				quota7dLimitPercent: number | null;
+			}>;
 		};
 		expect(payload.accounts[0]).toMatchObject({
 			accountKey: key,
 			tags: ["team-a"],
 			paused: true,
+			quota5hLimitPercent: 50,
+			quota7dLimitPercent: null,
 		});
 		expect(JSON.stringify(payload)).not.toContain("acct_1");
 		expect(JSON.stringify(payload)).not.toContain("owner@example.com");
+	});
+
+	it("shows text quota markers only when a window override is set", async () => {
+		const store: AccountPolicyStore = { version: 1, accounts: {} };
+		const deps = makeDeps(store);
+
+		expect(await runAccountCommand(["policy", "list"], deps)).toBe(0);
+		expect(String(deps.logInfo.mock.calls.at(-1)?.[0])).not.toContain("quota5h=");
+		expect(String(deps.logInfo.mock.calls.at(-1)?.[0])).not.toContain("quota7d=");
+
+		expect(
+			await runAccountCommand(["quota-limit", "1", "--7d", "12"], deps),
+		).toBe(0);
+		expect(await runAccountCommand(["policy", "list"], deps)).toBe(0);
+		const line = String(deps.logInfo.mock.calls.at(-1)?.[0]);
+		expect(line).toContain("quota7d=12%");
+		expect(line).not.toContain("quota5h=");
 	});
 
 	it("rejects invalid account indexes", async () => {
@@ -105,4 +215,3 @@ describe("account command", () => {
 		);
 	});
 });
-

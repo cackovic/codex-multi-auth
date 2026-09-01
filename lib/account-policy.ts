@@ -6,6 +6,7 @@ import { getCodexMultiAuthDir } from "./runtime-paths.js";
 import type { AccountMetadataV3 } from "./storage.js";
 import { isRecord, sleep } from "./utils.js";
 import { tempPathFor } from "./temp-path.js";
+import type { QuotaDeferralOverrides } from "./preemptive-quota-scheduler.js";
 
 export interface AccountPolicy {
 	accountKey: string;
@@ -14,6 +15,8 @@ export interface AccountPolicy {
 	paused: boolean;
 	drained: boolean;
 	note: string | null;
+	quotaRemainingPercentThreshold5h: number | null;
+	quotaRemainingPercentThreshold7d: number | null;
 	updatedAt: number;
 }
 
@@ -42,6 +45,12 @@ function normalizeWeight(value: unknown): number {
 		: 1;
 }
 
+function normalizePercentThresholdOrNull(value: unknown): number | null {
+	return typeof value === "number" && Number.isFinite(value)
+		? Math.max(0, Math.min(100, Math.floor(value)))
+		: null;
+}
+
 function normalizePolicy(key: string, value: unknown): AccountPolicy {
 	const record = isRecord(value) ? value : {};
 	const tags = Array.isArray(record.tags)
@@ -62,6 +71,12 @@ function normalizePolicy(key: string, value: unknown): AccountPolicy {
 		paused: record.paused === true,
 		drained: record.drained === true,
 		note: note.length > 0 ? note.slice(0, 500) : null,
+		quotaRemainingPercentThreshold5h: normalizePercentThresholdOrNull(
+			record.quotaRemainingPercentThreshold5h,
+		),
+		quotaRemainingPercentThreshold7d: normalizePercentThresholdOrNull(
+			record.quotaRemainingPercentThreshold7d,
+		),
 		updatedAt:
 			typeof record.updatedAt === "number" && Number.isFinite(record.updatedAt)
 				? record.updatedAt
@@ -207,9 +222,36 @@ export function upsertAccountPolicy(
 		),
 	].sort();
 	next.weight = normalizeWeight(next.weight);
+	next.quotaRemainingPercentThreshold5h = normalizePercentThresholdOrNull(
+		next.quotaRemainingPercentThreshold5h,
+	);
+	next.quotaRemainingPercentThreshold7d = normalizePercentThresholdOrNull(
+		next.quotaRemainingPercentThreshold7d,
+	);
 	next.updatedAt = now;
 	store.accounts[accountKey] = next;
 	return next;
+}
+
+export function getAccountQuotaThresholdOverride(
+	policy: AccountPolicy | undefined,
+): QuotaDeferralOverrides | undefined {
+	if (!policy) return undefined;
+	const primary = normalizePercentThresholdOrNull(
+		policy.quotaRemainingPercentThreshold5h,
+	);
+	const secondary = normalizePercentThresholdOrNull(
+		policy.quotaRemainingPercentThreshold7d,
+	);
+	if (primary === null && secondary === null) return undefined;
+	return {
+		...(primary === null
+			? {}
+			: { remainingPercentThresholdPrimary: primary }),
+		...(secondary === null
+			? {}
+			: { remainingPercentThresholdSecondary: secondary }),
+	};
 }
 
 export function normalizeAccountPolicyTag(value: string): string | null {
@@ -219,4 +261,3 @@ export function normalizeAccountPolicyTag(value: string): string | null {
 export function resetAccountPolicyWriteQueueForTests(): void {
 	writeQueue = Promise.resolve();
 }
-
