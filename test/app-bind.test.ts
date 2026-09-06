@@ -37,6 +37,16 @@ import {
 const tempRoots: string[] = [];
 const thisDir = dirname(fileURLToPath(import.meta.url));
 
+// spawnSync blocks the worker thread past Vitest's own testTimeout, so a
+// router script that fails to exit would hang the whole suite instead of
+// failing one test.
+const SPAWN_SYNC_GUARD = {
+	encoding: "utf8" as const,
+	windowsHide: true,
+	timeout: 15_000,
+	killSignal: "SIGKILL" as const,
+};
+
 async function createTempRoot(prefix: string): Promise<string> {
 	const root = await mkdtemp(join(tmpdir(), prefix));
 	tempRoots.push(root);
@@ -1815,10 +1825,7 @@ describe("Codex app runtime rotation bind", () => {
 				"--status",
 				statusPath,
 			],
-			{
-				encoding: "utf8",
-				windowsHide: true,
-			},
+			SPAWN_SYNC_GUARD,
 		);
 
 		expect(result.error).toBeUndefined();
@@ -1843,10 +1850,7 @@ describe("Codex app runtime rotation bind", () => {
 				"--status",
 				statusPath,
 			],
-			{
-				encoding: "utf8",
-				windowsHide: true,
-			},
+			SPAWN_SYNC_GUARD,
 		);
 
 		expect(result.error).toBeUndefined();
@@ -1873,10 +1877,7 @@ describe("Codex app runtime rotation bind", () => {
 				"--state",
 				statePath,
 			],
-			{
-				encoding: "utf8",
-				windowsHide: true,
-			},
+			SPAWN_SYNC_GUARD,
 		);
 
 		expect(result.error).toBeUndefined();
@@ -1900,10 +1901,7 @@ describe("Codex app runtime rotation bind", () => {
 				"--state",
 				statePath,
 			],
-			{
-				encoding: "utf8",
-				windowsHide: true,
-			},
+			SPAWN_SYNC_GUARD,
 		);
 
 		expect(result.error).toBeUndefined();
@@ -1938,8 +1936,8 @@ describe("Codex app runtime rotation bind", () => {
 					"1024",
 				],
 				{
+					...SPAWN_SYNC_GUARD,
 					stdio: ["ignore", logFd, logFd],
-					windowsHide: true,
 				},
 			);
 			expect(result.error).toBeUndefined();

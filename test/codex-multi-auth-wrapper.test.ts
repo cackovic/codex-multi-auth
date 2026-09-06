@@ -59,7 +59,7 @@ describe("codex-multi-auth wrapper", () => {
 		const result = spawnSync(
 			process.execPath,
 			[path.join(scriptsDir, "codex-multi-auth.js"), "auth", "--help"],
-			{ cwd: root, encoding: "utf8" },
+			{ cwd: root, encoding: "utf8", timeout: 15_000, killSignal: "SIGKILL" },
 		);
 
 		expect(result.status).toBe(0);

@@ -69,6 +69,8 @@ function fakeCodexBin(root: string): string {
 }
 
 function runWrapper(cwd: string, env: NodeJS.ProcessEnv) {
+	// spawnSync blocks the worker thread past Vitest's own testTimeout, so a
+	// wrapper that fails to exit would hang the whole suite, not just this test.
 	return spawnSync(process.execPath, [wrapperScript, "--version-noop"], {
 		cwd,
 		encoding: "utf8",
@@ -78,6 +80,8 @@ function runWrapper(cwd: string, env: NodeJS.ProcessEnv) {
 			CODEX_MULTI_AUTH_FORCE_FILE_AUTH_STORE: "1",
 			...env,
 		},
+		timeout: 15_000,
+		killSignal: "SIGKILL",
 	});
 }
 

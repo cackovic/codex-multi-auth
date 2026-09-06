@@ -47,8 +47,12 @@ const requiredGitignore = [
 ].join("\n");
 
 function runRepoHygiene(args: string[]) {
+	// spawnSync blocks the worker thread past Vitest's own testTimeout, so a
+	// script that fails to exit would hang the whole suite, not just this test.
 	return spawnSync(process.execPath, [scriptPath, ...args], {
 		encoding: "utf-8",
+		timeout: 15_000,
+		killSignal: "SIGKILL",
 	});
 }
 
