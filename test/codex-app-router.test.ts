@@ -11,6 +11,16 @@ const tempRoots: string[] = [];
 const thisDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(thisDir, "..");
 
+// spawnSync blocks the worker thread past Vitest's own testTimeout, so a
+// router script that fails to exit would hang the whole suite instead of
+// failing one test.
+const SPAWN_SYNC_GUARD = {
+	encoding: "utf8" as const,
+	windowsHide: true,
+	timeout: 15_000,
+	killSignal: "SIGKILL" as const,
+};
+
 async function createTempRoot(prefix: string): Promise<string> {
 	const root = await mkdtemp(join(tmpdir(), prefix));
 	tempRoots.push(root);
@@ -164,7 +174,7 @@ describe("codex app router daemon", () => {
 		const result = spawnSync(
 			process.execPath,
 			[scriptPath, "--status", statusPath, "--state", statePath],
-			{ encoding: "utf8", windowsHide: true },
+			SPAWN_SYNC_GUARD,
 		);
 
 		expect(result.status).not.toBe(0);
@@ -186,7 +196,7 @@ describe("codex app router daemon", () => {
 		const result = spawnSync(
 			process.execPath,
 			[scriptPath, "--status", statusPath, "--state", statePath],
-			{ encoding: "utf8", windowsHide: true },
+			SPAWN_SYNC_GUARD,
 		);
 
 		expect(result.status).not.toBe(0);
@@ -210,9 +220,8 @@ describe("codex app router daemon", () => {
 			process.execPath,
 			[scriptPath, "--status", statusPath, "--state", statePath],
 			{
-				encoding: "utf8",
+				...SPAWN_SYNC_GUARD,
 				env: { ...process.env, CODEX_APP_ROUTER_TEST_FAIL_PROXY: "1" },
-				windowsHide: true,
 			},
 		);
 
@@ -240,7 +249,7 @@ describe("codex app router daemon", () => {
 		const result = spawnSync(
 			process.execPath,
 			[scriptPath, "--status", statusPath, "--state", statePath],
-			{ encoding: "utf8", windowsHide: true },
+			SPAWN_SYNC_GUARD,
 		);
 
 		expect(result.status).not.toBe(0);

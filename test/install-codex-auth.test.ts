@@ -30,6 +30,11 @@ const appLauncherScriptPath = "scripts/codex-app-launcher.js";
 const tempRoots: string[] = [];
 const execFileAsync = promisify(execFile);
 
+// spawnSync blocks the worker thread past Vitest's own testTimeout, so a
+// script that fails to exit would hang the whole suite instead of failing
+// one test.
+const SPAWN_SYNC_TIMEOUT_MS = 15_000;
+
 afterEach(() => {
 	vi.useRealTimers();
 	vi.restoreAllMocks();
@@ -217,6 +222,8 @@ describe("install-codex-auth script", () => {
 			env,
 			encoding: "utf8",
 			windowsHide: true,
+			timeout: SPAWN_SYNC_TIMEOUT_MS,
+			killSignal: "SIGKILL",
 		});
 
 		expect(result.status).toBe(0);
@@ -428,6 +435,8 @@ describe("codex app launcher installer", () => {
 				},
 				encoding: "utf8",
 				windowsHide: true,
+				timeout: SPAWN_SYNC_TIMEOUT_MS,
+				killSignal: "SIGKILL",
 			},
 		);
 

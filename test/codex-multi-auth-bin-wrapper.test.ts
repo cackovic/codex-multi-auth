@@ -104,12 +104,16 @@ function simulateWindowsNpmShimInstall(prefixDir: string, binMap: Record<string,
 }
 
 function runWrapper(fixtureRoot: string, args: string[] = []) {
+	// spawnSync blocks the worker thread past Vitest's own testTimeout, so a
+	// wrapper that fails to exit would hang the whole suite, not just this test.
 	return spawnSync(
 		process.execPath,
 		[join(fixtureRoot, "scripts", "codex-multi-auth.js"), ...args],
 		{
 			encoding: "utf8",
 			env: createChildEnv(),
+			timeout: 15_000,
+			killSignal: "SIGKILL",
 		},
 	);
 }

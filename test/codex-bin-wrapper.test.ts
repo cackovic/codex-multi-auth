@@ -686,6 +686,13 @@ function buildWrapperEnv(extraEnv: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
 	return env;
 }
 
+// spawnSync blocks the worker thread past Vitest's own testTimeout, so every
+// runWrapper call needs its own bound or a stuck wrapper hangs the suite.
+const DEFAULT_WRAPPER_TIMEOUT_MS = 15_000;
+// Wider bound for the launch/exit stress loop, which fits inside its own
+// 240s test timeout and can legitimately run slower under load.
+const STRESS_WRAPPER_TIMEOUT_MS = 60_000;
+
 function runWrapper(
 	fixtureRoot: string,
 	args: string[],
@@ -698,14 +705,9 @@ function runWrapper(
 		{
 			encoding: "utf8",
 			env: buildWrapperEnv(extraEnv),
-			// Opt-in hard bound for the tests that deliberately stress the wrapper's
-			// shutdown path. `spawnSync` blocks the worker thread, so Vitest's
-			// `testTimeout` cannot interrupt it: without this, a shutdown regression
-			// hangs the whole run instead of failing an assertion. On timeout
-			// `result.error` is set, which those tests assert on.
-			...(options.timeoutMs === undefined
-				? {}
-				: { timeout: options.timeoutMs, killSignal: "SIGKILL" as const }),
+			// On timeout `result.error` is set, which the shutdown tests assert on.
+			timeout: options.timeoutMs ?? DEFAULT_WRAPPER_TIMEOUT_MS,
+			killSignal: "SIGKILL",
 		},
 	);
 }
@@ -8204,17 +8206,24 @@ describe("codex bin wrapper", () => {
 			// fixture that never engages, `app .` short-circuiting on the fake bin
 			// — would leave every count at zero and pass the whole test while
 			// demonstrating nothing about the leak it exists to guard.
-			const probe = runWrapper(fixtureRoot, ["app", "."], {
-				CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
-				CODEX_HOME: originalHome,
-				CODEX_MULTI_AUTH_DIR: multiAuthDir,
-				CODEX_MULTI_AUTH_RUNTIME_ROTATION_PROXY: "1",
-				// Long enough that the helper is unambiguously still alive when the
-				// probe looks for it.
-				CODEX_MULTI_AUTH_APP_ROTATION_IDLE_MS: "30000",
-				CODEX_MULTI_AUTH_APP_ROTATION_DETACHED_IDLE_MS: "0",
-				OPENAI_API_KEY: undefined,
-			});
+			const probe = runWrapper(
+				fixtureRoot,
+				["app", "."],
+				{
+					CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
+					CODEX_HOME: originalHome,
+					CODEX_MULTI_AUTH_DIR: multiAuthDir,
+					CODEX_MULTI_AUTH_RUNTIME_ROTATION_PROXY: "1",
+					// Long enough that the helper is unambiguously still alive when the
+					// probe looks for it.
+					CODEX_MULTI_AUTH_APP_ROTATION_IDLE_MS: "30000",
+					CODEX_MULTI_AUTH_APP_ROTATION_DETACHED_IDLE_MS: "0",
+					OPENAI_API_KEY: undefined,
+				},
+				// This test's own 240s budget (below) tolerates a slower launch under
+				// contention; the default bound does not.
+				{ timeoutMs: STRESS_WRAPPER_TIMEOUT_MS },
+			);
 			expect(probe.status).toBe(0);
 			const probeCounts = countHelperMetadata(multiAuthDir);
 			expect(probeCounts.status).toBeGreaterThan(0);
@@ -8242,17 +8251,22 @@ describe("codex bin wrapper", () => {
 			const counts: number[] = [];
 			let sawHelperDuringLoop = false;
 			for (let cycle = 0; cycle < cycles; cycle += 1) {
-				const result = runWrapper(fixtureRoot, ["app", "."], {
-					CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
-					CODEX_HOME: originalHome,
-					CODEX_MULTI_AUTH_DIR: multiAuthDir,
-					CODEX_MULTI_AUTH_RUNTIME_ROTATION_PROXY: "1",
-					// Short enough that each helper is gone well before the next
-					// launch sweeps for it.
-					CODEX_MULTI_AUTH_APP_ROTATION_IDLE_MS: "200",
-					CODEX_MULTI_AUTH_APP_ROTATION_DETACHED_IDLE_MS: "150",
-					OPENAI_API_KEY: undefined,
-				});
+				const result = runWrapper(
+					fixtureRoot,
+					["app", "."],
+					{
+						CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
+						CODEX_HOME: originalHome,
+						CODEX_MULTI_AUTH_DIR: multiAuthDir,
+						CODEX_MULTI_AUTH_RUNTIME_ROTATION_PROXY: "1",
+						// Short enough that each helper is gone well before the next
+						// launch sweeps for it.
+						CODEX_MULTI_AUTH_APP_ROTATION_IDLE_MS: "200",
+						CODEX_MULTI_AUTH_APP_ROTATION_DETACHED_IDLE_MS: "150",
+						OPENAI_API_KEY: undefined,
+					},
+					{ timeoutMs: STRESS_WRAPPER_TIMEOUT_MS },
+				);
 				expect(result.status).toBe(0);
 				await sleep(120);
 				const sample = countHelperMetadata(multiAuthDir);
@@ -8263,15 +8277,20 @@ describe("codex bin wrapper", () => {
 			// Give the last cycle's helper time to exit and one more launch to sweep
 			// after it.
 			await sleep(1_000);
-			runWrapper(fixtureRoot, ["app", "."], {
-				CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
-				CODEX_HOME: originalHome,
-				CODEX_MULTI_AUTH_DIR: multiAuthDir,
-				CODEX_MULTI_AUTH_RUNTIME_ROTATION_PROXY: "1",
-				CODEX_MULTI_AUTH_APP_ROTATION_IDLE_MS: "200",
-				CODEX_MULTI_AUTH_APP_ROTATION_DETACHED_IDLE_MS: "150",
-				OPENAI_API_KEY: undefined,
-			});
+			runWrapper(
+				fixtureRoot,
+				["app", "."],
+				{
+					CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
+					CODEX_HOME: originalHome,
+					CODEX_MULTI_AUTH_DIR: multiAuthDir,
+					CODEX_MULTI_AUTH_RUNTIME_ROTATION_PROXY: "1",
+					CODEX_MULTI_AUTH_APP_ROTATION_IDLE_MS: "200",
+					CODEX_MULTI_AUTH_APP_ROTATION_DETACHED_IDLE_MS: "150",
+					OPENAI_API_KEY: undefined,
+				},
+				{ timeoutMs: STRESS_WRAPPER_TIMEOUT_MS },
+			);
 			await sleep(1_000);
 
 			const final = countHelperMetadata(multiAuthDir);
